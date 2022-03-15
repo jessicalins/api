@@ -55,11 +55,9 @@ func startServicesForMetrics(t *testing.T, e e2e.Environment) (
 func startServicesForRules(t *testing.T, e e2e.Environment) (metricsRulesEndpoint string) {
 	// Create S3 replacement for rules backend
 	bucket := "obs_rules_test"
-	m := e2edb.NewMinio(e, "rules-minio", bucket)
-	testutil.Ok(t, m.Start())
-	testutil.Ok(t, m.WaitReady())
-	//m := newMinio(e, "rules-minio", bucket)
-	//testutil.Ok(t, e2e.StartAndWaitReady(m))
+	//m := e2edb.NewMinio(e, "rules-minio", bucket)
+	m := newMinio(e, "rules-minio", bucket)
+	testutil.Ok(t, e2e.StartAndWaitReady(m))
 	//t.Cleanup(e.Close)
 
 	//// Retrying since minio takes some time to get ready.
@@ -86,6 +84,7 @@ func startServicesForRules(t *testing.T, e e2e.Environment) (metricsRulesEndpoin
 
 func newMinio(env e2e.Environment, name, bktName string) *e2e.InstrumentedRunnable {
 	image := "minio/minio:RELEASE.2019-12-30T05-45-39Z"
+	//image := "minio/minio:RELEASE.2021-07-27T02-40-15Z"
 	minioPort := 8090
 	minioKESGithubContent := "https://raw.githubusercontent.com/minio/kes/master"
 	commands := []string{
