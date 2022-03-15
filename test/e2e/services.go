@@ -3,9 +3,11 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,9 +24,9 @@ const (
 	lokiImage   = "grafana/loki:2.3.0"
 	upImage     = "quay.io/observatorium/up:master-2021-02-12-03ef2f2"
 
-	dexImage        = "dexidp/dex:v2.30.0"
-	opaImage        = "openpolicyagent/opa:0.31.0"
-	gubernatorImage = "thrawn01/gubernator:1.0.0-rc.8"
+	dexImage              = "dexidp/dex:v2.30.0"
+	opaImage              = "openpolicyagent/opa:0.31.0"
+	gubernatorImage       = "thrawn01/gubernator:1.0.0-rc.8"
 	rulesObjectStoreImage = "quay.io/observatorium/rules-objstore:main-2022-01-19-8650540"
 
 	logLevelError = "error"
@@ -54,13 +56,67 @@ func startServicesForRules(t *testing.T, e e2e.Environment) (metricsRulesEndpoin
 	// Create S3 replacement for rules backend
 	bucket := "obs_rules_test"
 	m := e2edb.NewMinio(e, "rules-minio", bucket)
-	testutil.Ok(t, e2e.StartAndWaitReady(m))
+	testutil.Ok(t, m.Start())
+	testutil.Ok(t, m.WaitReady())
+	//m := newMinio(e, "rules-minio", bucket)
+	//testutil.Ok(t, e2e.StartAndWaitReady(m))
+	//t.Cleanup(e.Close)
+
+	//// Retrying since minio takes some time to get ready.
+	//// Details: https://github.com/efficientgo/e2e/issues/11
+	//ctx, cancel := context.WithTimeout(context.Background(), time.Second*20)
+	//defer cancel()
+	//
+	//testutil.Ok(t, runutil.Retry(time.Second*2, ctx.Done(), func() error {
+	//	t.Log(">>>>>>>>> CALL StartAndWaitReady")
+	//	err := e2e.StartAndWaitReady(m)
+	//	if err != nil {
+	//		t.Log(">>>> ERR: ", err)
+	//		return err
+	//	}
+	//	return nil
+	//}))
 
 	createRulesYAML(t, e, bucket, m.InternalEndpoint(e2edb.AccessPortName), e2edb.MinioAccessKey, e2edb.MinioSecretKey)
 	rulesBackend := newRulesBackendService(e)
 	testutil.Ok(t, e2e.StartAndWaitReady(rulesBackend))
 
 	return rulesBackend.InternalEndpoint("http")
+}
+
+func newMinio(env e2e.Environment, name, bktName string) *e2e.InstrumentedRunnable {
+	image := "minio/minio:RELEASE.2019-12-30T05-45-39Z"
+	minioPort := 8090
+	minioKESGithubContent := "https://raw.githubusercontent.com/minio/kes/master"
+	commands := []string{
+		"curl -sSL --tlsv1.2 -O '%s/root.key'	-O '%s/root.cert'",
+		"mkdir -p /data/%s && minio server --certs-dir /shared/data/certs --address :%v --quiet /data",
+	}
+
+	return e2e.NewInstrumentedRunnable(
+		env,
+		name,
+		map[string]int{"https": minioPort},
+		"https").Init(
+		e2e.StartOptions{
+			Image: image,
+			// Create the required bucket before starting minio.
+			Command: e2e.NewCommandWithoutEntrypoint("sh", "-c", fmt.Sprintf(strings.Join(commands, " && "), minioKESGithubContent, minioKESGithubContent, bktName, minioPort)),
+			//Readiness: e2e.NewHTTPReadinessProbe("http", "/minio/health/ready", 200, 200),
+			Readiness: e2e.NewCmdReadinessProbe(e2e.NewCommand("sh", "-c", "sleep 1 && curl -k https://127.0.0.1:8090/minio/health/ready")),
+			EnvVars: map[string]string{
+				"MINIO_ACCESS_KEY": e2edb.MinioAccessKey,
+				"MINIO_SECRET_KEY": e2edb.MinioSecretKey,
+				"MINIO_BROWSER":    "off",
+				"ENABLE_HTTPS":     "0",
+				// https://docs.min.io/docs/minio-kms-quickstart-guide.html
+				"MINIO_KMS_KES_ENDPOINT":  "https://play.min.io:7373",
+				"MINIO_KMS_KES_KEY_FILE":  "root.key",
+				"MINIO_KMS_KES_CERT_FILE": "root.cert",
+				"MINIO_KMS_KES_KEY_NAME":  "my-minio-key",
+			},
+		},
+	)
 }
 
 func startServicesForLogs(t *testing.T, e e2e.Environment) (

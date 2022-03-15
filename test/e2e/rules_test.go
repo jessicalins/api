@@ -74,7 +74,7 @@ groups:
 func TestRulesAPI(t *testing.T) {
 	t.Parallel()
 
-	e, err := e2e.NewDockerEnvironment(envRulesAPIName)
+	e, err := e2e.NewDockerEnvironment(envRulesAPIName, e2e.WithVerbose())
 	testutil.Ok(t, err)
 	t.Cleanup(e.Close)
 
